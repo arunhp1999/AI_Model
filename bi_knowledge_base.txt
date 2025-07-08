@@ -1,0 +1,47 @@
+
+# BI Knowledge Summary for GPT SQL Assistant
+
+## 📂 Tables and Views Used
+- webcenter.WcReports_DocApprovalQ
+- webcenter.WcReports_ProjectsQ
+- webcenter.WcReports_TasksQ
+- webcenter.WcReports_Project_AttrQ
+- webcenter.Submitted_ApprovalsQ
+- webcenter.DocVersion_ApproversQ
+
+## 📊 Concepts & Metrics Extracted
+
+### 1. Documents Module
+- Document approvals from `WcReports_DocApprovalQ`
+- Version creation date: `DocVersion_CreatedDate`
+- Linked to Projects via `Project_Id`
+- Joined with quality data (LastVersionIndex) and rejection reasons
+
+### 2. Projects Module
+- Project metadata from `WcReports_ProjectsQ`
+- Fields: `Project_Id`, `Project_Name`, `Project_StatusName`, `Project_CreatedDate`, `Project_Duration_Days`
+- Project_Type derived from name prefixes: ADHOC, REN, SKU, REPRO, Others
+
+### 3. Tasks Module
+- Tasks from `WcReports_TasksQ`, fields: `Task_Name`, `Task_StartedDate`, `Task_CompletedDate`
+- Used to compute stage durations (Briefing, Approval, Artwork)
+
+### 4. Project Attributes
+- Attributes like Market, Brand, Category, Operating Unit from `WcReports_Project_AttrQ`
+- Pivoted to show per-project context
+
+### 5. Stage Durations
+- Briefing Stage: based on task names like “Finalise SKU Brief”, “Production Brief”
+- Approval Stage: different logic for EU vs Other units
+- Artwork Stage: filtered by region and task types
+
+## 🤖 AI Assistant Training Guidance
+- Use keywords like “briefing”, “approval stage”, “project duration” to infer relevant modules
+- Documents are linked via `Document_Id`, Projects via `Project_Id`
+- Quality is evaluated via `Document_LastVersionIndex`
+- Markets, Brands, OUs come from Project Attribute tables and grouped by `Project_Id`
+
+## 🔁 Integration Plan
+- Store this text in a `bi_knowledge_base.txt`
+- During prompt generation, append this to schema + recent chat memory:
+  e.g., `context = schema + history + bi_knowledge_base`

@@ -1,149 +1,135 @@
 import os
 import streamlit as st
 import pandas as pd
-from openai import OpenAI
-from dotenv import load_dotenv
 import mysql.connector
+from openai import OpenAI
 import plotly.express as px
 
-# Load environment variables
+# --- Load environment variables ---
+from dotenv import load_dotenv
 load_dotenv()
-client = OpenAI()  # Initialize OpenAI client using API key from .env
 
-# Load BI knowledge base
+# --- GPT client setup ---
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# --- Streamlit page config ---
+st.set_page_config(page_title="AI SQL Assistant", layout="wide")
+st.title("🧠 AI SQL Assistant for MySQL + BI")
+
+# --- Load BI knowledge ---
 @st.cache_data
 def load_bi_knowledge(path="bi_knowledge_base.txt"):
-    with open(path, "r", encoding="utf-8") as f:
-        return f.read()
+    with open(path, "r", encoding="utf-8") as file:
+        return file.read()
 
 bi_knowledge = load_bi_knowledge()
 
-# Load schema for all modules
+# --- Load schema modules ---
 @st.cache_data
-def load_schemas():
-    schemas = {}
-    modules_path = "modules"
-    for filename in os.listdir(modules_path):
-        if filename.endswith(".csv"):
-            module_name = filename.replace("_schema.csv", "")
-            df = pd.read_csv(os.path.join(modules_path, filename))
-            schemas[module_name] = df
-    return schemas
+def load_schema(module):
+    df = pd.read_csv(f"modules/{module}_schema.csv")
+    return df.to_string(index=False)
 
-schemas = load_schemas()
+# --- DB connection ---
+@st.cache_data
+def connect_to_db():
+    return mysql.connector.connect(
+        host=os.getenv("DB_HOST"),
+        port=int(os.getenv("DB_PORT", 3306)),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASS"),
+        database=os.getenv("DB_NAME")
+    )
 
-# Detect relevant modules using GPT
+# --- Chat memory ---
+if "chat_history" not in st.session_state:
+    st.session_state.chat_history = []
+
+# --- Detect relevant modules using GPT ---
 def detect_modules(user_input):
     module_prompt = f"""
-You are an AI that selects relevant modules for a SQL query.
-Modules available: {list(schemas.keys())}
-User question: {user_input}
-List only relevant modules (comma-separated).
+You are a smart assistant. Given the user question below, return only relevant module names (Documents, Projects, Tasks) as a list.
+
+User question: "{user_input}"
+Relevant modules:
 """
     response = client.chat.completions.create(
         model="gpt-4",
         messages=[{"role": "user", "content": module_prompt}]
     )
-    modules = response.choices[0].message.content.strip()
-    return [m.strip().lower() for m in modules.split(",")]
+    modules = response.choices[0].message.content.strip().replace("'", "").replace('"', "").split(",")
+    return [m.strip().lower() for m in modules if m.strip()]
 
-# Format schema to feed into prompt
-def format_schema(modules):
-    desc = ""
-    for m in modules:
-        if m in schemas:
-            desc += f"\nModule: {m}\n"
-            desc += schemas[m].to_string(index=False)
-            desc += "\n"
-    return desc
-
-# Generate SQL from GPT
-def generate_sql(user_input, schema_desc, chat_memory, bi_knowledge):
-    prompt = f"""
+# --- Build prompt for SQL generation ---
+def build_prompt(user_input, modules):
+    schema_descriptions = "\n\n".join([load_schema(m) for m in modules])
+    formatted_chat_history = "\n".join(
+        [f"User: {x['question']}\nSQL: {x['sql']}\nResult: {x['df_head']}" for x in st.session_state.chat_history[-3:]]
+    )
+    return f"""
 You are a MySQL assistant with BI context.
 
 Schema:
-{schema_desc}
+{schema_descriptions}
 
 BI Insights:
 {bi_knowledge}
 
 Conversation so far:
-{chat_memory}
+{formatted_chat_history}
 
 User: {user_input}
 SQL:
 """
-    response = client.chat.completions.create(
-        model="gpt-4",
-        messages=[{"role": "user", "content": prompt}]
-    )
-    return response.choices[0].message.content.strip()
 
-# Connect to MySQL
-@st.cache_resource
-def connect_to_db():
-    return mysql.connector.connect(
-        host="localhost",
-        user="root",
-        password="Arunahp@1999",
-        database="web_center_db"
-    )
+# --- Run SQL and visualize ---
+def run_query(query):
+    conn = connect_to_db()
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
 
-db_conn = connect_to_db()
-
-# Session chat memory
-if "chat_history" not in st.session_state:
-    st.session_state.chat_history = []
-
-# UI Setup
-st.set_page_config(page_title="AI SQL Assistant", layout="wide")
-st.title("🤖 GPT-Powered SQL Assistant with BI Knowledge")
-
-user_input = st.text_input("Ask a question about your data:")
+# --- UI: input ---
+user_input = st.text_input("Ask a data question:")
 
 if user_input:
-    with st.spinner("🔎 Understanding your question..."):
-        # Step 1: detect modules
+    try:
+        # Step 1: Detect modules
         modules = detect_modules(user_input)
+        st.write("📦 Using Modules:", modules)
 
-        # Step 2: format schema
-        schema_desc = format_schema(modules)
+        # Step 2: Build prompt
+        prompt = build_prompt(user_input, modules)
 
-        # Step 3: format chat memory
-        chat_memory = ""
-        for item in st.session_state.chat_history[-3:]:
-            chat_memory += f"\nUser: {item['question']}\nSQL: {item['sql']}\nPreview: {item['df_head']}\n"
+        # Step 3: Get SQL from GPT
+        sql_response = client.chat.completions.create(
+            model="gpt-4",
+            messages=[{"role": "user", "content": prompt}]
+        )
+        query = sql_response.choices[0].message.content.strip()
+        st.code(query, language="sql")
 
-        # Step 4: generate SQL
-        query = generate_sql(user_input, schema_desc, chat_memory, bi_knowledge)
+        # Step 4: Run query
+        df = run_query(query)
+        st.dataframe(df)
 
-        # ✅ Cleanup GPT code fences if present
-        if query.startswith("```"):
-            query = query.strip("```").strip()
-            if query.lower().startswith("sql"):
-                query = query[3:].strip()
+        # Step 5: Add to history
+        st.session_state.chat_history.append({
+            "question": user_input,
+            "sql": query,
+            "df_head": df.head(3).to_dict()
+        })
 
-        # Step 5: execute query
-        try:
-            df = pd.read_sql(query, db_conn)
-            st.success("✅ Query executed successfully!")
-            st.code(query, language="sql")
-            st.dataframe(df)
+        # Step 6: Chart (if numeric + group)
+        if len(df.columns) >= 2:
+            x, y = df.columns[0], df.columns[1]
+            if pd.api.types.is_numeric_dtype(df[y]):
+                fig = px.bar(df, x=x, y=y)
+                st.plotly_chart(fig, use_container_width=True)
 
-            # Step 6: store history
-            st.session_state.chat_history.append({
-                "question": user_input,
-                "sql": query,
-                "df_head": df.head(3).to_dict()
-            })
+        # Step 7: Download
+        csv = df.to_csv(index=False).encode('utf-8')
+        st.download_button("⬇ Download CSV", csv, "result.csv", "text/csv")
 
-            # Step 7: chart
-            if len(df.columns) >= 2:
-                x_col, y_col = df.columns[:2]
-                fig = px.bar(df, x=x_col, y=y_col)
-                st.plotly_chart(fig)
-                st.download_button("📥 Export CSV", df.to_csv(index=False), "result.csv", "text/csv")
-
-        except Exception as e:
-            st.error(f"❌ Error executing SQL:\n\n{e}")
+    except Exception as e:
+        st.error(f"❌ Error: {e}")

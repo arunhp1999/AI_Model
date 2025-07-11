@@ -1,20 +1,18 @@
-import os
 import streamlit as st
 import pandas as pd
 import mysql.connector
 from openai import OpenAI
 import plotly.express as px
 
-# --- Load environment variables ---
-from dotenv import load_dotenv
-load_dotenv()
-
-# --- GPT client setup ---
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
 # --- Streamlit page config ---
 st.set_page_config(page_title="AI SQL Assistant", layout="wide")
 st.title("🧠 AI SQL Assistant for MySQL + BI")
+
+# --- Use Streamlit secrets ---
+secrets = st.secrets
+
+# --- GPT client setup ---
+client = OpenAI(api_key=secrets["OPENAI_API_KEY"])
 
 # --- Load BI knowledge ---
 @st.cache_data
@@ -34,11 +32,11 @@ def load_schema(module):
 @st.cache_resource
 def connect_to_db():
     return mysql.connector.connect(
-        host=os.getenv("DB_HOST"),
-        port=int(os.getenv("DB_PORT", 3306)),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASS"),
-        database=os.getenv("DB_NAME")
+        host=secrets["DB_HOST"],
+        port=int(secrets["DB_PORT"]),
+        user=secrets["DB_USER"],
+        password=secrets["DB_PASS"],
+        database=secrets["DB_NAME"]
     )
 
 # --- Chat memory ---
@@ -58,7 +56,7 @@ Relevant modules:
         messages=[{"role": "user", "content": module_prompt}]
     )
     modules = response.choices[0].message.content.strip().replace("'", "").replace('"', "").split(",")
-    return [m.strip("[]").strip().lower() for m in modules if m.strip()]
+    return [m.strip().lower() for m in modules if m.strip()]
 
 # --- Build prompt for SQL generation ---
 def build_prompt(user_input, modules):

@@ -31,7 +31,7 @@ def load_schema(module):
     return df.to_string(index=False)
 
 # --- DB connection ---
-@st.cache_data
+@st.cache_resource
 def connect_to_db():
     return mysql.connector.connect(
         host=os.getenv("DB_HOST"),

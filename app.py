@@ -5,11 +5,11 @@ import mysql.connector
 from openai import OpenAI
 import plotly.express as px
 
-# --- Load environment variables ---
+# --- Load environment variables from Streamlit secrets ---
 db = st.secrets
 
 # --- GPT client setup ---
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+client = OpenAI(api_key=db["OPENAI_API_KEY"])
 
 # --- Streamlit page config ---
 st.set_page_config(page_title="AI SQL Assistant", layout="wide")
@@ -26,19 +26,26 @@ bi_knowledge = load_bi_knowledge()
 # --- Load schema modules ---
 @st.cache_data
 def load_schema(module):
-    df = pd.read_csv(f"modules/{module}_schema.csv")
+    path = f"modules/{module}_schema.csv"
+    if not os.path.exists(path):
+        raise FileNotFoundError(f"Schema file not found: {path}")
+    df = pd.read_csv(path)
     return df.to_string(index=False)
 
 # --- DB connection ---
 @st.cache_resource
 def connect_to_db():
-    return mysql.connector.connect(
-    host=db["DB_HOST"],
-    port=int(db["DB_PORT"]),
-    user=db["DB_USER"],
-    password=db["DB_PASS"],
-    database=db["DB_NAME"]
-)
+    try:
+        return mysql.connector.connect(
+            host=db["DB_HOST"],
+            port=int(db["DB_PORT"]),
+            user=db["DB_USER"],
+            password=db["DB_PASS"],
+            database=db["DB_NAME"]
+        )
+    except mysql.connector.Error as err:
+        st.error(f"Database connection error: {err}")
+        return None
 
 # --- Chat memory ---
 if "chat_history" not in st.session_state:
@@ -56,8 +63,10 @@ Relevant modules:
         model="gpt-4",
         messages=[{"role": "user", "content": module_prompt}]
     )
-    modules = response.choices[0].message.content.strip().replace("'", "").replace('"', "").split(",")
-    return [m.strip("[]").strip().lower() for m in modules if m.strip()]
+    # Parse module names from GPT response
+    modules = response.choices[0].message.content.strip().replace("'", "").replace('"', "")
+    modules = modules.strip("[]").split(",")
+    return [m.strip().lower() for m in modules if m.strip()]
 
 # --- Build prompt for SQL generation ---
 def build_prompt(user_input, modules):
@@ -84,6 +93,8 @@ SQL:
 # --- Run SQL and visualize ---
 def run_query(query):
     conn = connect_to_db()
+    if conn is None:
+        raise Exception("MySQL Connection not available")
     df = pd.read_sql(query, conn)
     conn.close()
     return df

@@ -58,7 +58,7 @@ Relevant modules:
         messages=[{"role": "user", "content": module_prompt}]
     )
     modules = response.choices[0].message.content.strip().replace("'", "").replace('"', "").split(",")
-    return [m.strip().lower() for m in modules if m.strip()]
+    return [m.strip("[]").strip().lower() for m in modules if m.strip()]
 
 # --- Build prompt for SQL generation ---
 def build_prompt(user_input, modules):

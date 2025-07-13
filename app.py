@@ -118,9 +118,11 @@ if user_input:
         )
         query = sql_response.choices[0].message.content.strip()
 
-        # ✅ Strip Markdown SQL formatting if present
-        if query.startswith("```sql"):
-            query = query.replace("```sql", "").replace("```", "").strip()
+        # ✅ Strip any Markdown formatting (```sql or just ```)
+        if query.startswith("```"):
+            query = query.strip("`").strip()
+            if query.lower().startswith("sql"):
+                query = query[3:].strip()
 
         st.code(query, language="sql")
 

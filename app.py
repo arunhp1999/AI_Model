@@ -117,6 +117,11 @@ if user_input:
             messages=[{"role": "user", "content": prompt}]
         )
         query = sql_response.choices[0].message.content.strip()
+
+        # ✅ Strip Markdown SQL formatting if present
+        if query.startswith("```sql"):
+            query = query.replace("```sql", "").replace("```", "").strip()
+
         st.code(query, language="sql")
 
         # Step 4: Run query
